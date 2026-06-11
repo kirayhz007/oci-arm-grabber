@@ -159,3 +159,17 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 .vscode
+
+# === Credentials & runtime files (NEVER commit) ===
+oci.env
+oci_config
+*.pem
+id_rsa
+id_rsa.pub
+id_rsa_private
+INSTANCE_CREATED
+images_list.json
+ERROR_IN_CONFIG.log
+UNHANDLED_ERROR.log
+nohup.out
+.venv/

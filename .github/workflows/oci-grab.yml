@@ -1,0 +1,91 @@
+name: OCI Free Tier Grabber
+
+# 定时尝试抢 Oracle 免费 ARM 实例。
+# 凭证全部来自仓库 Secrets，代码里不含任何敏感信息。
+on:
+  schedule:
+    # 每 30 分钟跑一次（cron 是 UTC，且为尽力而为，可能延迟）
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}   # 允许在 Actions 页面手动点击运行
+
+# 避免上一次还没跑完就又触发，导致并发重复请求
+concurrency:
+  group: oci-grab
+  cancel-in-progress: false
+
+jobs:
+  grab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Reconstruct credentials from secrets
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          SSH_PUB_KEY: ${{ secrets.SSH_PUB_KEY }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+        run: |
+          printf '%s\n' "$OCI_PRIVATE_KEY" > oci_api_private_key.pem
+          chmod 600 oci_api_private_key.pem
+          printf '%s\n' "$SSH_PUB_KEY" > id_rsa.pub
+          cat > oci_config <<EOF
+          [DEFAULT]
+          user=$OCI_USER
+          fingerprint=$OCI_FINGERPRINT
+          tenancy=$OCI_TENANCY
+          region=$OCI_REGION
+          key_file=${{ github.workspace }}/oci_api_private_key.pem
+          EOF
+
+      - name: Generate oci.env
+        env:
+          OCT_FREE_AD: ${{ secrets.OCT_FREE_AD }}
+          OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          cat > oci.env <<EOF
+          OCI_CONFIG=${{ github.workspace }}/oci_config
+          OCT_FREE_AD=$OCT_FREE_AD
+          DISPLAY_NAME=my-arm-ubuntu-instance
+          OCI_COMPUTE_SHAPE=VM.Standard.A1.Flex
+          SECOND_MICRO_INSTANCE=False
+          REQUEST_WAIT_TIME_SECS=60
+          SSH_AUTHORIZED_KEYS_FILE=${{ github.workspace }}/id_rsa.pub
+          OCI_SUBNET_ID=$OCI_SUBNET_ID
+          OCI_IMAGE_ID=
+          OPERATING_SYSTEM="Canonical Ubuntu"
+          OS_VERSION=22.04
+          ASSIGN_PUBLIC_IP=true
+          BOOT_VOLUME_SIZE=50
+          NOTIFY_EMAIL=False
+          DISCORD_WEBHOOK=$DISCORD_WEBHOOK
+          EOF
+
+      - name: Attempt to launch instance (time-boxed)
+        run: |
+          # 单次运行最多跑 8 分钟（约 8 次尝试）后被 timeout 终止，等下次定时再来。
+          # 实例一旦抢到，脚本会自然退出（exit 0）。
+          timeout 480 python main.py || true
+
+      - name: Report result
+        run: |
+          if [ -f INSTANCE_CREATED ]; then
+            echo "::notice title=SUCCESS::🎉 抢到实例了！详情见下方。"
+            echo "===== INSTANCE_CREATED ====="
+            cat INSTANCE_CREATED
+          else
+            echo "本轮仍无容量（Out of host capacity），下次定时继续。"
+            echo "----- launch_instance.log (tail) -----"
+            tail -n 15 launch_instance.log 2>/dev/null || echo "(无日志)"
+          fi
