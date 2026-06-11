@@ -1,0 +1,55 @@
+name: OCI Grabber Heartbeat
+
+# 每天往 Discord 发一条状态：仍在值守 / 已抢到。让你确切知道程序还活着、抢到没。
+on:
+  schedule:
+    - cron: '0 1 * * *'   # 每天 01:00 UTC = 北京时间 09:00
+  workflow_dispatch: {}
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install oci python-dotenv requests
+
+      - name: Reconstruct credentials from secrets
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+        run: |
+          printf '%s\n' "$OCI_PRIVATE_KEY" > oci_api_private_key.pem
+          chmod 600 oci_api_private_key.pem
+          cat > oci_config <<EOF
+          [DEFAULT]
+          user=$OCI_USER
+          fingerprint=$OCI_FINGERPRINT
+          tenancy=$OCI_TENANCY
+          region=$OCI_REGION
+          key_file=${{ github.workspace }}/oci_api_private_key.pem
+          EOF
+
+      - name: Generate oci.env
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          cat > oci.env <<EOF
+          OCI_CONFIG=${{ github.workspace }}/oci_config
+          OCI_COMPUTE_SHAPE=VM.Standard.A1.Flex
+          DISCORD_WEBHOOK=$DISCORD_WEBHOOK
+          EOF
+
+      - name: Send heartbeat to Discord
+        env:
+          RUN_DATE: ${{ github.event.repository.updated_at }}
+        run: RUN_DATE="$(date -u '+%Y-%m-%d %H:%M UTC')" python heartbeat.py
