@@ -40,6 +40,8 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", 'False').strip().lower() == 'true'
 EMAIL = os.getenv("EMAIL", "").strip()
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "").strip()
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "").strip()
+# 每隔多少秒往通知渠道报一次“我还在跑”（0 表示关闭）。默认 1 小时。
+HEARTBEAT_SECS = int(os.getenv("HEARTBEAT_SECS", "3600").strip() or "0")
 
 # Read the configuration from oci_config file
 config = configparser.ConfigParser()
@@ -430,7 +432,16 @@ def launch_instance():
     else:
         shape_config = oci.core.models.LaunchInstanceShapeConfigDetails(ocpus=1, memory_in_gbs=1)
 
+    attempt = 0
+    last_heartbeat = time.time()
     while not instance_exist_flag:
+        attempt += 1
+        # 定时报平安：每 HEARTBEAT_SECS 秒发一条，让你知道程序仍在跑
+        if HEARTBEAT_SECS and time.time() - last_heartbeat >= HEARTBEAT_SECS:
+            send_discord_message(
+                f"⏳ 仍在抢 {OCI_COMPUTE_SHAPE}（暂无容量），已尝试 {attempt} 次，程序运行正常，继续蹲……"
+            )
+            last_heartbeat = time.time()
         try:
             launch_instance_response = compute_client.launch_instance(
                 launch_instance_details=oci.core.models.LaunchInstanceDetails(

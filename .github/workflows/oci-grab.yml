@@ -73,6 +73,7 @@ jobs:
           BOOT_VOLUME_SIZE=50
           NOTIFY_EMAIL=False
           DISCORD_WEBHOOK=$DISCORD_WEBHOOK
+          HEARTBEAT_SECS=3600
           EOF
 
       - name: Attempt to launch instance (time-boxed)
