@@ -4,9 +4,10 @@ name: OCI Free Tier Grabber
 # 凭证全部来自仓库 Secrets，代码里不含任何敏感信息。
 on:
   schedule:
-    # 每 15 分钟触发一次（GitHub cron 最快只支持 5 分钟，且为尽力而为）。
-    # 配合下方每轮约 14 分钟的运行时长，做到首尾相接、近乎不间断。
-    - cron: '*/15 * * * *'
+    # 每 4 小时触发一次（UTC）。配合下方每轮约 5h40m 的运行时长 + 并发不重叠，
+    # 新触发的运行会排队、等当前这轮结束立刻接上 → 首尾相接、无空档。
+    # 单轮就能连续抢近 6 小时，大幅降低对 GitHub 定时器准点的依赖。
+    - cron: '0 */4 * * *'
   workflow_dispatch: {}   # 允许在 Actions 页面手动点击运行
 
 # 避免上一次还没跑完就又触发，导致并发重复请求
@@ -17,7 +18,8 @@ concurrency:
 jobs:
   grab:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # GitHub 单任务硬上限 6 小时；设 350 分钟，留余量给收尾步骤
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
@@ -75,10 +77,10 @@ jobs:
 
       - name: Attempt to launch instance (time-boxed)
         run: |
-          # 单轮最多跑 14 分钟（脚本内部每 60 秒试一次，约 14 次尝试）后被 timeout 终止。
-          # 与每 15 分钟的定时触发首尾相接 → 全天候近乎不间断、每 60 秒一试。
+          # 单轮最多连续跑 5h40m（20400 秒），脚本内部每 60 秒试一次（约 340 次尝试）。
+          # 之后被 timeout 终止、收尾，等下一轮接上 → 全天候近乎不间断、每 60 秒一试。
           # 实例一旦抢到，脚本会自然退出（exit 0）。
-          timeout 840 python main.py || true
+          timeout 20400 python main.py || true
 
       - name: Report result
         run: |
